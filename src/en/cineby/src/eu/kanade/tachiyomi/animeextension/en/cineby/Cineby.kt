@@ -1,7 +1,9 @@
 package eu.kanade.tachiyomi.animeextension.en.cineby
 
 import android.content.SharedPreferences
+import android.os.Build
 import android.text.InputType
+import androidx.annotation.RequiresApi
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
@@ -43,9 +45,9 @@ class Cineby :
         get() = preferences.domainPref
 
     // Cineby/Videasy proxy
-    private val apiUrl = "https://db.videasy.net/3"
+    private val apiUrl = "https://db.wingsdatabase.com/3"
 
-    private fun apiOrigin(url: String): String = url.replace(Regex("""https?://www\."""), "https://")
+    private fun apiOrigin(url: String): String = url.toHttpUrl().run { "$scheme://$host" }
 
     override val lang = "en"
     override val supportsLatest = true
@@ -447,6 +449,7 @@ class Cineby :
     override fun episodeListParse(response: Response): List<SEpisode> = throw UnsupportedOperationException("Not used")
 
     // ============================ Video Links ============================
+    @RequiresApi(Build.VERSION_CODES.N)
     override suspend fun getVideoList(episode: SEpisode): List<Video> {
         val (path, extraDataEncoded) = episode.url.split("#", limit = 2)
         val (title, year, imdbId) =
@@ -614,7 +617,7 @@ class Cineby :
         private const val MIN_VOTES_FOR_RECENT_SORT = "50"
 
         private const val PREF_DOMAIN_KEY = "pref_domain"
-        private val DOMAIN_ENTRIES = arrayOf("www.cineby.sc", "www.fmovies.gd", "www.bitcine.tv")
+        private val DOMAIN_ENTRIES = arrayOf("www.cineby.at", "www.cineplay.to", "www.fmovies.gd")
         private val DOMAIN_VALUES = DOMAIN_ENTRIES.map { "https://$it" }
         private val PREF_DOMAIN_DEFAULT = DOMAIN_VALUES.first()
 
@@ -629,6 +632,6 @@ class Cineby :
 
         private const val PREF_SERVERS_KEY = "pref_servers_v2"
         private val PREF_SERVERS_DEFAULT =
-            setOf("Neon", "Yoru", "Cypher", "Sage")
+            setOf("Jett", "Neon", "Yoru", "Tejo")
     }
 }
