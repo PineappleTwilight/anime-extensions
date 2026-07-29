@@ -1,5 +1,6 @@
 package keiyoushi.templating
 
+import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
 fun Element.getImageUrl(): String? = when {
@@ -97,3 +98,21 @@ fun Element.parseDate(dateString: String): String? {
         "$year-$month-$day"
     }
 }
+
+fun Document.getIframeSrc(selector: String = "iframe"): String? =
+    selectFirst(selector)?.let { it.attr("abs:src").ifBlank { it.attr("abs:data-src") } }
+
+fun Document.getIframeSrcs(selector: String = "iframe"): List<String> =
+    select(selector).mapNotNull { it.attr("abs:src").ifBlank { null } }
+
+fun Document.getVideoSource(): String? =
+    selectFirst("video source")?.attr("abs:src")
+
+fun Document.getScriptData(matcher: String): String? =
+    selectFirst("script:containsData($matcher)")?.data()
+
+fun Document.getScriptDataList(matcher: String): List<String> =
+    select("script:containsData($matcher)").map { it.data() }
+
+fun Document.hasNextPage(nextPageSelector: String = "a[rel=next], li.page-item.active:not(li:last-child), a:contains(Next)"): Boolean =
+    selectFirst(nextPageSelector) != null
