@@ -27,14 +27,27 @@ core/src/main/kotlin/keiyoushi/templating/
 
   # Utility Functions (standalone helpers)
   VideoUtils.kt              # Video sorting and filtering
+  EpisodeUtils.kt            # Episode list sorting
   ScoreDisplay.kt            # Star rating display (★★★★☆)
   StatusUtils.kt             # Anime status parsing (Ongoing/Completed)
-  ElementExtensions.kt       # Jsoup Element helpers (getImageUrl, getInfo)
+  ElementExtensions.kt       # Jsoup Element/Document helpers
+
+core/src/main/kotlin/keiyoushi/utils/
+  UrlUtils.kt                # URL fixing, video URL detection, extraction
+  M3u8Utils.kt               # M3U8 playlist parsing
+  TextUtils.kt               # Episode number extraction, title cleaning
+  Date.kt                    # Date parsing with DateUtils
+  ElementHelpers.kt          # Deprecated: use keiyoushi.templating instead
 
 lib/anilib/src/aniyomi/lib/anilib/
   AniLibMetadataProvider.kt  # Concrete provider wrapping AniLib (priority 20)
   TenraiMetadataProvider.kt  # Jikan v4 compatible (priority 10, reads nativeIds["mal"])
   KitsuMetadataProvider.kt   # Kitsu REST API (priority 15, reads nativeIds["kitsu"])
+  TmdbMetadataProvider.kt    # TMDb REST API (priority 25, reads nativeIds["tmdb"])
+  ImdbMetadataProvider.kt    # OMDb API (priority 30, reads extra["imdb_id"])
+
+lib/ddosguard/src/aniyomi/lib/ddosguard/
+  DdosGuardInterceptor.kt    # DDoS-Guard cookie bypass interceptor
 ```
 
 ## How It Fits Together
@@ -145,7 +158,63 @@ override val metadataSubProviders = listOf(
     TenraiMetadataProvider(priority = 10),      // enrich with MAL data
     KitsuMetadataProvider(priority = 15),       // enrich with Kitsu data
     AniLibMetadataProvider(priority = 20),      // enrich with AniList data
+    TmdbMetadataProvider(priority = 25),        // enrich with TMDb data
+    ImdbMetadataProvider(priority = 30),        // enrich with IMDb data
 )
+```
+
+#### TMDb Provider
+
+The TMDb provider fetches metadata from The Movie Database API. It requires:
+- A TMDb ID in `context.nativeIds["tmdb"]` (numeric)
+- An API key in preferences under `"tmdb_api_key"`
+
+TMDb API keys can be obtained free at: https://www.themoviedb.org/settings/api
+
+```kotlin
+// Add preference for API key
+override val preferenceSchema = listOf(
+    PreferenceEntry.EditTextPreference(
+        key = "tmdb_api_key",
+        title = "TMDb API Key",
+        summary = "Get your free API key at themoviedb.org",
+        default = "",
+    ),
+)
+
+// Populate TMDb ID in delegate
+override val metadataDelegate = { ctx: MetaproviderContext ->
+    ExtensionMetadata(
+        nativeIds = mapOf("tmdb" to tmdbIdFromSource),
+    )
+}
+```
+
+#### IMDb Provider
+
+The IMDb provider fetches metadata from the OMDb API (omdbapi.com). Since IMDb IDs are strings (e.g., "tt1234567"), they are stored in `context.extra["imdb_id"]` rather than in `nativeIds`. It requires:
+- An IMDb ID in `context.extra["imdb_id"]` (String)
+- An API key in preferences under `"omdb_api_key"`
+
+OMDb API keys can be obtained free at: http://www.omdbapi.com/apikey.aspx
+
+```kotlin
+// Add preference for API key
+override val preferenceSchema = listOf(
+    PreferenceEntry.EditTextPreference(
+        key = "omdb_api_key",
+        title = "OMDb API Key",
+        summary = "Get your free API key at omdbapi.com",
+        default = "",
+    ),
+)
+
+// Populate IMDb ID in delegate (using extra map since IDs are strings)
+override val metadataDelegate = { ctx: MetaproviderContext ->
+    ExtensionMetadata(
+        extra = mapOf("imdb_id" to "tt1234567"),
+    )
+}
 ```
 
 #### AniList ID as Master ID
@@ -223,6 +292,8 @@ val context = MetaproviderContext.fromAnime(
 | `TenraiMetadataProvider` | 10 | `nativeIds["mal"]` | Jikan v4 compatible REST API |
 | `KitsuMetadataProvider` | 15 | `nativeIds["kitsu"]` | Kitsu REST API |
 | `AniLibMetadataProvider` | 20 | `anilistId` | AniList GraphQL via AniLib |
+| `TmdbMetadataProvider` | 25 | `nativeIds["tmdb"]` | TMDb REST API (requires API key) |
+| `ImdbMetadataProvider` | 30 | `extra["imdb_id"]` | OMDb API (requires API key) |
 
 ### 4. Use a Pre-Populate Delegate (Optional)
 
@@ -285,6 +356,8 @@ The provider chain depends on IDs to look up external metadata. If a source has 
 | `TenraiMetadataProvider` | `nativeIds["mal"]` | empty |
 | `KitsuMetadataProvider` | `nativeIds["kitsu"]` | empty |
 | `AniLibMetadataProvider` | `anilistId` | empty |
+| `TmdbMetadataProvider` | `nativeIds["tmdb"]` + API key | empty |
+| `ImdbMetadataProvider` | `extra["imdb_id"]` + API key | empty |
 
 Sources that only have a MAL ID (but no AniList ID) can still use `LocalAnimeDatabaseProvider` and `TenraiMetadataProvider` — the orchestrator automatically resolves the AniList ID from the MAL ID, then populates all other native IDs. Similarly, sources with no external IDs at all should populate metadata entirely from their own API response via the delegate:
 
@@ -401,6 +474,8 @@ class MyAnimeExtension : AnimeExtension() {
         TenraiMetadataProvider(priority = 10),
         KitsuMetadataProvider(priority = 15),
         AniLibMetadataProvider(priority = 20),
+        TmdbMetadataProvider(priority = 25),
+        ImdbMetadataProvider(priority = 30),
     )
 
     override val metadataDelegate = { ctx: MetaproviderContext ->
@@ -612,6 +687,116 @@ val result = videos.filterAndSort(
     allowedTypes = setOf("Sub", "Dub"),
     deduplicate = true,
 )
+```
+
+### UrlUtils
+
+```kotlin
+import keiyoushi.utils.UrlUtils
+
+// Fix protocol-relative or broken URLs
+val fixed = UrlUtils.fixUrl("//example.com/path", "https://base.com")
+
+// Check URL types
+UrlUtils.isVideoUrl("https://example.com/video.mp4")  // true
+UrlUtils.isM3u8Url("https://example.com/stream.m3u8")  // true
+UrlUtils.isMpdUrl("https://example.com/stream.mpd")    // true
+
+// Extract URLs from text
+val videos = UrlUtils.extractVideoUrls(scriptData)
+val m3u8s = UrlUtils.extractM3u8Urls(pageHtml)
+
+// Fix JSON-escaped URLs
+val clean = UrlUtils.fixJsonUrl("https:\\/\\/example.com\\/video.mp4")
+```
+
+### M3u8Utils
+
+```kotlin
+import keiyoushi.utils.M3u8Utils
+
+// Parse master playlist
+val streams = M3u8Utils.parseMasterPlaylist(masterPlaylistContent)
+// Returns: List<M3u8Stream> with quality, url, resolution, bandwidth
+
+// Fetch and parse from URL
+val streams = M3u8Utils.fetchMasterPlaylist(client, masterUrl)
+
+// Extract subtitles from playlist
+val subs = M3u8Utils.extractSubtitles(playlistContent)
+// Returns: List<Pair<String, String>> (name, url)
+```
+
+### TextUtils
+
+```kotlin
+import keiyoushi.utils.TextUtils
+
+// Extract episode number from various formats
+TextUtils.extractEpisodeNumber("Episode 5")        // 5.0
+TextUtils.extractEpisodeNumber("S01E05")            // 5.0
+TextUtils.extractEpisodeNumber("Episodio 12")       // 12.0
+
+// Extract quality
+TextUtils.extractQuality("1080p - Server")          // "1080p"
+TextUtils.extractQualityNumber("720p")              // 720
+
+// Clean anime titles
+TextUtils.cleanAnimeTitle("Title Subtitle Indonesia")  // "Title"
+
+// Normalize language codes
+TextUtils.normalizeLanguageCode("id")    // "id"
+TextUtils.normalizeLanguageCode("ind")   // "id"
+TextUtils.normalizeLanguageCode("pt-br") // "pt"
+```
+
+### DateUtils
+
+```kotlin
+import keiyoushi.utils.DateUtils
+
+// Parse with auto-detection of common formats
+val timestamp = DateUtils.parseDate("2024-01-15")
+
+// Parse with specific formats
+val timestamp = DateUtils.parseDate(
+    "15/01/2024",
+    "dd/MM/yyyy",
+    "yyyy-MM-dd",
+)
+
+// Parse with locale
+val timestamp = DateUtils.parseDate(
+    "15 janeiro 2024",
+    "d MMMM yyyy",
+    locale = Locale("pt", "BR"),
+)
+
+// Format timestamp
+val date = DateUtils.formatDate(timestamp, "dd/MM/yyyy")
+```
+
+### EpisodeUtils
+
+```kotlin
+import keiyoushi.templating.sortByEpisodeNumber
+
+// Sort episodes descending (newest first)
+val sorted = episodes.sortByEpisodeNumber()
+
+// Sort episodes ascending (oldest first)
+val sorted = episodes.sortByEpisodeNumberAsc()
+```
+
+### DdosGuardInterceptor
+
+```kotlin
+import aniyomi.lib.ddosguard.DdosGuardInterceptor
+
+// Add to OkHttpClient builder
+val client = OkHttpClient.Builder()
+    .addInterceptor(DdosGuardInterceptor(client))
+    .build()
 ```
 
 ### ScoreDisplay
