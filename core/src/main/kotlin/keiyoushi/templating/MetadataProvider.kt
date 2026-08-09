@@ -45,6 +45,16 @@ class MetadataProvider(
         }
 
         val result = resolveInternal(context, metadataDelegate)
+
+        val anilistId = context.anilistId
+        if (anilistId != null && result.isComplete()) {
+            runCatching {
+                databaseCache?.putMetadata(anilistId, result)
+            }.onFailure { e ->
+                Log.w(TAG, "Write-back to local database cache failed", e)
+            }
+        }
+
         metadataCache[cacheKey] = CachedMetadata(result, System.currentTimeMillis())
         return result
     }
@@ -68,41 +78,47 @@ class MetadataProvider(
         }
 
         val sorted = subProviders.sortedBy { it.priority }
-        return when (mergeStrategy) {
+        var acc = seed
+        when (mergeStrategy) {
             MergeStrategy.FILL_NULLS -> {
-                sorted.fold(seed) { acc, provider ->
+                for (provider in sorted) {
                     val provided = runCatching {
                         provider.provide(finalContext)
                     }.getOrElse { e ->
                         Log.w(TAG, "Provider '${provider.name}' failed", e)
                         ExtensionMetadata()
                     }
-                    acc.merge(provided)
+                    acc = acc.merge(provided)
+                    if (acc.isComplete()) break
                 }
             }
             MergeStrategy.OVERRIDE_ALL -> {
-                sorted.fold(seed) { acc, provider ->
+                for (provider in sorted) {
                     val provided = runCatching {
                         provider.provide(finalContext)
                     }.getOrElse { e ->
                         Log.w(TAG, "Provider '${provider.name}' failed", e)
                         ExtensionMetadata()
                     }
-                    acc.overrideWith(provided)
+                    acc = acc.overrideWith(provided)
+                    if (acc.isComplete()) break
                 }
             }
             MergeStrategy.OVERRIDE_NON_DELEGATE -> {
-                sorted.fold(seed) { acc, provider ->
+                val delegateMeta = metadataDelegate?.let { seed }
+                for (provider in sorted) {
                     val provided = runCatching {
                         provider.provide(finalContext)
                     }.getOrElse { e ->
                         Log.w(TAG, "Provider '${provider.name}' failed", e)
                         ExtensionMetadata()
                     }
-                    mergeNonDelegateFields(acc, provided, metadataDelegate?.let { seed })
+                    acc = mergeNonDelegateFields(acc, provided, delegateMeta)
+                    if (acc.isComplete()) break
                 }
             }
         }
+        return acc
     }
 
     private fun mergeNonDelegateFields(

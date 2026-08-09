@@ -12,8 +12,8 @@ core/src/main/kotlin/keiyoushi/templating/
   ExtensionMetadata.kt       # Standardized metadata data class
   MetaproviderContext.kt     # Context object passed to providers/delegates
   MetadataSubProvider.kt     # Interface for pluggable sub-providers
-  MetadataProvider.kt        # Per-extension orchestrator (merging + ID resolution)
-  AnimeDatabaseCache.kt      # Downloads/caches anime-offline-database, builds ID maps
+  MetadataProvider.kt        # Per-extension orchestrator (merging + ID resolution + early termination)
+  AnimeDatabaseCache.kt      # Downloads/caches anime-offline-database, builds ID maps, write-back support
   LocalAnimeDatabaseProvider.kt  # Reads from cached database (priority 0)
   PreferenceEntry.kt         # Sealed interface: EditTextPreference / ListPreference / SwitchPreferenceCompat / MultiSelectListPreference
   PreferenceRegistry.kt       # Auto-managed schema → typed reads + UI + persistence
@@ -875,6 +875,23 @@ The `extClass` manifest contract is preserved — `AnimeExtension` subclasses mu
 - All existing extensions and multisrc themes — unchanged
 - `keiyoushi.utils.Source` — stays (deprecated, not removed)
 
+## Extensions-lib 16 Alignment
+
+`AnimeExtension` aligns with aniyomi extensions-lib 16 (16-rc4) by exposing stubs for all new abstract methods. Extensions that extend `AnimeExtension` get the correct method signatures for the lib 16 video pipeline:
+
+| Method | Signature | Purpose |
+|---|---|---|
+| `seasonListRequest` | `(anime: SAnime): Request` | Fetch season list for multi-season anime |
+| `seasonListParse` | `(response: Response): List<SAnime>` | Parse season list from response |
+| `hosterListRequest` | `(episode: SEpisode): Request` | Fetch hoster list for an episode |
+| `hosterListParse` | `(response: Response): List<Hoster>` | Parse hoster list from response |
+| `videoListRequest` | `(hoster: Hoster): Request` | Fetch video list for a hoster |
+| `videoListParse` | `(response: Response, hoster: Hoster): List<Video>` | Parse videos from hoster response |
+
+The lib 16 video pipeline is: `Episode → Hoster → Video`. Extensions override `hosterListParse` to return `Hoster` objects (each with a `hosterUrl`), then the app calls `videoListParse` per hoster. Legacy extensions that return videos directly can return `List<Video>.toHosterList()` from `hosterListParse` for backward compatibility.
+
+`AnimeExtension` also imports `eu.kanade.tachiyomi.animesource.model.Hoster` and preserves all pre-16 stubs (`popularAnime`, `latestUpdates`, `searchAnime`, `animeDetails`, `episodeList`) unchanged.
+
 ## Robustness & Error Handling
 
 The framework is designed to be resilient to failures in providers, delegates, and external data sources.
@@ -899,6 +916,36 @@ If the `metadataDelegate` throws, it returns empty metadata and providers procee
 ### Metadata Caching
 
 `MetadataProvider` caches resolved metadata for 5 minutes per AniList ID (or nativeIds hash). Repeated calls to `resolveMetadata()` for the same anime skip the full provider chain. Call `metadataProvider.clearCache()` to invalidate.
+
+### Early Chain Termination
+
+When the accumulated metadata reaches a "complete" state (`title`, `description`, `thumbnailUrl`, `genre`, and `status` all non-null), the provider chain short-circuits — remaining lower-priority providers are skipped entirely. This avoids unnecessary API calls to external services (TMDb, IMDb, etc.) when the data is already fully populated.
+
+```kotlin
+// Example: delegate provides all fields → chain stops immediately
+override val metadataDelegate = { ctx: MetaproviderContext ->
+    val apiData = fetchFromSourceApi(ctx.animeUrl)
+    ExtensionMetadata(
+        title = apiData.title,
+        description = apiData.description,
+        thumbnailUrl = apiData.cover,
+        genre = apiData.genres.joinToString(),
+        status = apiData.status,
+    )
+}
+// LocalAnimeDatabaseProvider (priority 0) runs, finds gaps filled → done
+// TenraiMetadataProvider (priority 10) is NEVER called
+```
+
+This applies to all merge strategies (`FILL_NULLS`, `OVERRIDE_ALL`, `OVERRIDE_NON_DELEGATE`).
+
+### Write-Back to Local Database
+
+When the resolved metadata is "complete" **and** an AniList ID is available, `MetadataProvider` writes the enriched metadata back to `AnimeDatabaseCache`. Future lookups for the same AniList ID will find the enriched data in the local index without re-querying external providers.
+
+This means the local cache improves over time: the first lookup for an anime may call multiple providers, but subsequent lookups find pre-populated data.
+
+The write-back is wrapped in `runCatching` — a failure to persist never breaks the resolve flow.
 
 ### Lifecycle Hooks
 

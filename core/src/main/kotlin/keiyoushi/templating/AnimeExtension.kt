@@ -9,6 +9,7 @@ import android.widget.Toast
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.animesource.ConfigurableAnimeSource
 import eu.kanade.tachiyomi.animesource.model.AnimeFilterList
+import eu.kanade.tachiyomi.animesource.model.Hoster
 import eu.kanade.tachiyomi.animesource.model.SAnime
 import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
@@ -330,10 +331,22 @@ abstract class AnimeExtension :
     override fun episodeListParse(response: Response) = throw UnsupportedOperationException(
         "episodeListParse not implemented. Override this method in your extension.",
     )
-    override fun videoListRequest(episode: SEpisode) = throw UnsupportedOperationException(
+    override fun seasonListRequest(anime: SAnime) = throw UnsupportedOperationException(
+        "seasonListRequest not implemented. Override this method in your extension.",
+    )
+    override fun seasonListParse(response: Response) = throw UnsupportedOperationException(
+        "seasonListParse not implemented. Override this method in your extension.",
+    )
+    override fun hosterListRequest(episode: SEpisode) = throw UnsupportedOperationException(
+        "hosterListRequest not implemented. Override this method in your extension.",
+    )
+    override fun hosterListParse(response: Response) = throw UnsupportedOperationException(
+        "hosterListParse not implemented. Override this method in your extension.",
+    )
+    override fun videoListRequest(hoster: Hoster) = throw UnsupportedOperationException(
         "videoListRequest not implemented. Override this method in your extension.",
     )
-    override fun videoListParse(response: Response) = throw UnsupportedOperationException(
+    override fun videoListParse(response: Response, hoster: Hoster) = throw UnsupportedOperationException(
         "videoListParse not implemented. Override this method in your extension.",
     )
 }

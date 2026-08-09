@@ -143,6 +143,36 @@ open class AnimeDatabaseCache(
         )
     }
 
+    /**
+     * Writes enriched [metadata] back to the local index so future lookups
+     * for [anilistId] benefit from the resolved content fields without
+     * re-querying external providers.
+     *
+     * Updates the in-memory [inMemoryIndex] and persists to [indexFile],
+     * preserving any existing native ID fields (malId/kitsuId/anidbId).
+     * Only non-null content fields from [metadata] overwrite the entry;
+     * null fields leave any existing value untouched. Calls
+     * [updateTimestamp] so the cache freshness window is refreshed.
+     */
+    open suspend fun putMetadata(anilistId: Int, metadata: ExtensionMetadata) {
+        val index = getIndex()
+        val key = anilistId.toString()
+        val entry = index.optJSONObject(key) ?: JSONObject()
+
+        metadata.title?.let { entry.put("title", it) }
+        metadata.thumbnailUrl?.let { entry.put("thumbnail", it) }
+        metadata.genre?.let { entry.put("genre", it) }
+        metadata.status?.let { entry.put("status", it) }
+
+        index.put(key, entry)
+        inMemoryIndex = index
+
+        synchronized(lock) {
+            indexFile?.writeText(index.toString())
+        }
+        updateTimestamp()
+    }
+
     private fun needsDownload(): Boolean {
         val db = dbFile ?: return true
         val idx = indexFile ?: return true

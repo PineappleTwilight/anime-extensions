@@ -113,6 +113,18 @@ data class ExtensionMetadata(
 
     fun hasContentMetadata(): Boolean = title != null || description != null || thumbnailUrl != null
 
+    /**
+     * Returns `true` when all content fields that matter for a "complete"
+     * metadata entry are non-null: [title], [description], [thumbnailUrl],
+     * [genre], and [status].
+     *
+     * Used by [MetadataProvider] to short-circuit the provider chain once
+     * enough data has been accumulated, and to decide whether to write
+     * the resolved metadata back to [AnimeDatabaseCache].
+     */
+    fun isComplete(): Boolean = title != null && description != null &&
+        thumbnailUrl != null && genre != null && status != null
+
     fun getMalId(): Int? = nativeIds["mal"]
 
     fun getKitsuId(): Int? = nativeIds["kitsu"]
