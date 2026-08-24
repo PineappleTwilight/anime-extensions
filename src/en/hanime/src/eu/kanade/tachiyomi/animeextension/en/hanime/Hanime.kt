@@ -441,6 +441,8 @@ class Hanime :
         try {
             val videos = fetchHandshakeVideos(slug)
             if (videos.isNotEmpty()) return videos
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "getVideoList() — handshake failed: ${e.javaClass.simpleName}: ${e.message}")
         }
