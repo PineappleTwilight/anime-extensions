@@ -294,3 +294,30 @@ data class ManifestStream(
     @SerialName("hv_id")
     val hvId: Long? = null,
 )
+
+/**
+ * Decrypted payload of the `x-token` returned by POST /api/v11/handshake.
+ * Contains preroll (ad) metadata and the HLS sources for the video.
+ */
+@Serializable
+data class HandshakePayload(
+    @SerialName("is_preroll_enabled")
+    val isPrerollEnabled: Boolean? = null,
+    val probability: Double? = null,
+    @SerialName("preroll_url")
+    val prerollUrl: String? = null,
+    @SerialName("ad_variant")
+    val adVariant: String? = null,
+    val sources: List<HandshakeSource> = emptyList(),
+)
+
+@Serializable
+data class HandshakeSource(
+    val src: String = "",
+    val type: String? = null,
+    val height: Int? = null,
+    val width: Long? = null,
+    val label: String? = null,
+    /** "normal" for playable streams, "promotion" for ad placeholders. */
+    val kind: String? = null,
+)
