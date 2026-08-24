@@ -527,7 +527,7 @@ class Hanime :
 
         return hits
             .filter { getTitle(it.name) == seriesName }
-            .sortedBy { it.createdAtUnix ?: it.releasedAtUnix ?: 0L }
+            .sortedByDescending { it.createdAtUnix ?: it.releasedAtUnix ?: 0L }
             .mapIndexed { idx, hit ->
                 SEpisode.create().apply {
                     episode_number = idx + 1f
