@@ -13,6 +13,7 @@ import eu.kanade.tachiyomi.animesource.model.SEpisode
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.await
 import keiyoushi.utils.addEditTextPreference
 import keiyoushi.utils.addListPreference
@@ -26,10 +27,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import okhttp3.Headers
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import java.util.Locale
@@ -430,11 +435,92 @@ class Hanime :
 
     override suspend fun getVideoList(episode: SEpisode): List<Video> {
         setAuthCookie()
+
+        // Primary path: v11 handshake protocol (slug-based, current site flow)
+        val slug = extractSlugFromUrl(episode.url)
+        try {
+            val videos = fetchHandshakeVideos(slug)
+            if (videos.isNotEmpty()) return videos
+        } catch (e: Exception) {
+            Log.w(TAG, "getVideoList() — handshake failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
+
+        // Fallback: legacy flows (premium cookie / v8 guest manifest)
         return if (authCookie != null) {
             fetchVideoListPremium(episode)
         } else {
             fetchVideoListWithSignature(episode)
         }
+    }
+
+    /**
+     * Fetch video streams via POST /api/v11/handshake on auth.hanime.tv.
+     *
+     * Flow:
+     * 1. Obtain a signature bundle (`x-signature` / `x-time` headers) from
+     *    the configured [SignatureProvider]
+     * 2. Seal `{"timestamp_unix", "directive": "htv_player_handshake", "slug"}`
+     *    into an AES-256-GCM token ([HandshakeCipher.seal])
+     * 3. POST it as `{"token": ...}`; the server returns the encrypted
+     *    payload in the `x-token` response header
+     * 4. Open the token ([HandshakeCipher.open]) and keep sources with
+     *    kind == "normal" (kind "promotion" entries are preroll ads)
+     * 5. Expand each master m3u8 into playable videos via PlaylistUtils
+     */
+    private suspend fun fetchHandshakeVideos(slug: String): List<Video> {
+        val signature = ensureSignatureProvider().getSignature()
+        val payload = buildJsonObject {
+            put("timestamp_unix", signature.time.toLong())
+            put("directive", "htv_player_handshake")
+            put("slug", slug)
+        }.toString()
+        val token = HandshakeCipher.seal(payload)
+
+        val requestHeaders = headers.newBuilder()
+            .set("x-signature-version", "web2")
+            .set("x-signature", signature.signature)
+            .set("x-time", signature.time)
+            .set("x-csrf-token", "null")
+            .apply { authCookie?.let { set("cookie", it) } }
+            .build()
+
+        val requestBody = """{"token":"$token"}"""
+            .toRequestBody("application/json".toMediaType())
+
+        return client.newCall(POST("$AUTH_BASE_URL/api/v11/handshake", requestHeaders, body = requestBody))
+            .await()
+            .use { response ->
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "fetchHandshakeVideos() — handshake non-2xx (${response.code}) for slug '$slug'")
+                    return@use emptyList()
+                }
+                val xToken = response.header("x-token")
+                if (xToken.isNullOrEmpty()) {
+                    Log.w(TAG, "fetchHandshakeVideos() — missing x-token header for slug '$slug'")
+                    return@use emptyList()
+                }
+
+                val handshakePayload = HandshakeCipher.open(xToken).parseAs<HandshakePayload>()
+                val playerHeaders = videoHeaders()
+                handshakePayload.sources
+                    .filter { it.kind == "normal" && it.src.contains(".m3u8") }
+                    .flatMap { stream ->
+                        runCatching {
+                            playlistUtils.extractFromHls(
+                                playlistUrl = stream.src,
+                                masterHeaders = playerHeaders,
+                                videoHeaders = playerHeaders,
+                                videoNameGen = { quality ->
+                                    val label = if (quality == "Video") "${stream.height ?: "unknown"}p" else quality
+                                    label
+                                },
+                            )
+                        }.getOrElse { e ->
+                            Log.w(TAG, "fetchHandshakeVideos() — HLS extraction failed for ${stream.label ?: "${stream.height}p"}: ${e.javaClass.simpleName}: ${e.message}")
+                            listOf(Video(stream.src, stream.label ?: "${stream.height ?: "?"}p", stream.src, headers = playerHeaders))
+                        }
+                    }
+            }
     }
 
     /**
@@ -1095,6 +1181,9 @@ class Hanime :
     companion object {
         private const val TAG = "Hanime"
         private const val DEFAULT_CDN_BASE_URL = "https://cached.freeanimehentai.net"
+
+        /** Auth API host for the v11 handshake endpoint. */
+        private const val AUTH_BASE_URL = "https://auth.hanime.tv"
 
         private const val PREF_QUALITY_KEY = "preferred_quality"
         private const val PREF_QUALITY_DEFAULT = "1080p"
