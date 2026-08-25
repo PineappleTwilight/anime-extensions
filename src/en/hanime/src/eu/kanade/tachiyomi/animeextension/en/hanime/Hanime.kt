@@ -320,11 +320,14 @@ class Hanime :
         }
         val sorted = if (ordering == "asc") filtered.sortedWith(comparator.reversed()) else filtered.sortedWith(comparator)
 
+        // Deduplicate by series BEFORE slicing so each series appears only once across pages
+        val uniqueSeries = sorted.distinctBy { getTitle(it.name) }
+
         // Paginate
         val fromIndex = (page - 1) * pageSize
-        val toIndex = minOf(fromIndex + pageSize, sorted.size)
-        val pageItems = if (fromIndex < sorted.size) sorted.subList(fromIndex, toIndex) else emptyList()
-        val hasNextPage = toIndex < sorted.size
+        val toIndex = minOf(fromIndex + pageSize, uniqueSeries.size)
+        val pageItems = if (fromIndex < uniqueSeries.size) uniqueSeries.subList(fromIndex, toIndex) else emptyList()
+        val hasNextPage = toIndex < uniqueSeries.size
 
         return AnimesPage(parseHitsToAnimeList(pageItems), hasNextPage)
     }
@@ -529,7 +532,7 @@ class Hanime :
             .sortedByDescending { it.createdAtUnix ?: it.releasedAtUnix ?: 0L }
             .mapIndexed { idx, hit ->
                 SEpisode.create().apply {
-                    episode_number = idx + 1f
+                    episode_number = parseEpisodeNumber(hit.name, seriesName, idx + 1)
                     name = formatEpisodeTitle(hit.name, seriesName, idx, titleFormat)
                     date_upload = (hit.createdAtUnix ?: hit.releasedAtUnix ?: 0L) * 1000
                     setUrlWithoutDomain("https://hanime.tv/videos/hentai/" + hit.slug)
@@ -916,6 +919,28 @@ class Hanime :
 
         /** Extracts numeric quality value from a quality label like "1080p". */
         private val QUALITY_RESOLUTION_REGEX by lazy { Regex("""(\d+)p""") }
+
+        /**
+         * Parses the episode number from a raw video name, mirroring
+         * [formatEpisodeTitle]'s identifier patterns. Falls back to [fallback]
+         * when the name carries no recognizable episode number.
+         */
+        fun parseEpisodeNumber(rawName: String?, seriesName: String, fallback: Int): Float {
+            if (rawName == null) return fallback.toFloat()
+            val trimmed = rawName.trim()
+            // "Title Season N" — N is a season label, not an episode number
+            if (SEASON_PATTERN_REGEX.containsMatchIn(trimmed)) return fallback.toFloat()
+            // "Title Ep N"
+            EP_PATTERN_REGEX.find(trimmed)?.let { return it.groupValues[1].toFloat() }
+            // "Title N" — only when the text before the number is the series name itself
+            TRAILING_NUMBER_REGEX.find(trimmed)?.let { match ->
+                val beforeNumber = trimmed.substring(0, match.range.first)
+                if (beforeNumber.trim().equals(seriesName, ignoreCase = true)) {
+                    return match.groupValues[1].toFloat()
+                }
+            }
+            return fallback.toFloat()
+        }
     }
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
