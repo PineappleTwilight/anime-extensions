@@ -16,12 +16,12 @@ import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.await
 import keiyoushi.utils.addListPreference
 import keiyoushi.utils.getPreferencesLazy
+import keiyoushi.utils.parallelFlatMap
 import keiyoushi.utils.parseAs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.Headers
@@ -474,12 +474,11 @@ class Hanime :
                     return@use emptyList()
                 }
 
-                val handshakeJson = Json { ignoreUnknownKeys = true }
-                val handshakePayload = HandshakeCipher.open(xToken).parseAs<HandshakePayload>(handshakeJson)
+                val handshakePayload = HandshakeCipher.open(xToken).parseAs<HandshakePayload>()
                 val playerHeaders = videoHeaders()
                 handshakePayload.sources
                     .filter { it.kind == "normal" && it.src.isNotBlank() }
-                    .flatMap { stream ->
+                    .parallelFlatMap { stream ->
                         val streamUrl = resolveSourceUrl(stream.src)
                         runCatching {
                             playlistUtils.extractFromHls(
@@ -532,7 +531,7 @@ class Hanime :
                 SEpisode.create().apply {
                     episode_number = idx + 1f
                     name = formatEpisodeTitle(hit.name, seriesName, idx, titleFormat)
-                    date_upload = (hit.releasedAtUnix ?: hit.createdAtUnix ?: 0L) * 1000
+                    date_upload = (hit.createdAtUnix ?: hit.releasedAtUnix ?: 0L) * 1000
                     setUrlWithoutDomain("https://hanime.tv/videos/hentai/" + hit.slug)
                 }
             }
