@@ -315,7 +315,7 @@ class Hanime :
             "likes" -> compareByDescending { it.likes ?: 0L }
             "created_at_unix", "published_at_unix" -> compareByDescending { it.createdAtUnix ?: 0L }
             "released_at_unix" -> compareByDescending { it.releasedAtUnix ?: 0L }
-            "title_sortable" -> compareBy { it.name.lowercase(Locale.US) }
+            "title_sortable" -> compareByDescending { it.name.lowercase(Locale.US) }
             else -> compareByDescending { it.likes ?: 0L }
         }
         val sorted = if (ordering == "asc") filtered.sortedWith(comparator.reversed()) else filtered.sortedWith(comparator)
