@@ -157,6 +157,7 @@ class AaApiError(
 ) {
     @Serializable
     class GraphQlError(
+        val message: String? = null,
         val extensions: Extensions? = null,
     ) {
         @Serializable
@@ -168,11 +169,13 @@ class AaApiError(
 
 // Response of `/client-crypto/v1/bootstrap`. `k` echoes back the content lane the partB is
 // scoped to; a mismatch means the server answered for a different lane than we asked for.
+// `switchAt` is the epoch boundary the server rotates keys at; material must be refreshed then.
 @Serializable
 class AaCryptoBootstrap(
     val epoch: Long,
     val partB: String,
     val k: String? = null,
+    val switchAt: Long? = null,
 )
 
 @Serializable
